@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>alphaXiv Citation Counts</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img class="mark" src="icons/icon32.png" alt="" />
+        <div>
+          <h1>Citation Counts</h1>
+          <p>for alphaXiv papers and references</p>
+        </div>
+      </header>
+
+      <label class="toggle-row">
+        <span>Enabled</span>
+        <input id="enabled" type="checkbox" />
+      </label>
+
+      <section class="loading-options">
+        <label class="toggle-row" for="preload-references">
+          <span>Preload reference counts</span>
+          <input id="preload-references" type="checkbox" aria-describedby="preload-help" />
+        </label>
+        <p id="preload-help" class="help">
+          Leave off to look up references as you open their cards. Turn on to load available reference counts when a paper opens. The open paper's own count loads in either mode.
+        </p>
+      </section>
+
+      <section>
+        <label for="api-key">Semantic Scholar API key <small>recommended</small></label>
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Semantic Scholar key" />
+        <p class="help">
+          Counts come from Semantic Scholar. Save a key in this Chrome profile for more reliable access. If a count is unavailable, use the Google Scholar link beside the paper or reference.
+          <a href="https://www.semanticscholar.org/product/api#api-key-form" target="_blank" rel="noopener noreferrer">Request a key</a>
+        </p>
+      </section>
+
+      <div class="actions">
+        <button id="save" class="primary">Save &amp; test</button>
+        <button id="clear" class="secondary">Clear cache</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p id="page-status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

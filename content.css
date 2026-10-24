@@ -1,0 +1,92 @@
+.axcc-citation-count {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 0.45rem !important;
+  min-height: 1.7rem !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin: 0.1rem 0 0.15rem !important;
+  padding: 0.28rem 0.55rem !important;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent) !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, currentColor 5%, transparent) !important;
+  color: inherit !important;
+  font-family: inherit !important;
+  font-size: 0.72rem !important;
+  line-height: 1 !important;
+}
+
+.axcc-result {
+  color: inherit !important;
+  font-weight: 650 !important;
+  text-decoration: none !important;
+}
+
+a.axcc-result:hover {
+  text-decoration: underline !important;
+}
+
+.axcc-scholar {
+  color: inherit !important;
+  font-size: 0.64rem !important;
+  font-weight: 650 !important;
+  text-decoration: underline !important;
+  text-underline-offset: 0.12em !important;
+}
+
+.axcc-source {
+  color: currentColor !important;
+  font-size: 0.64rem !important;
+  opacity: 0.55 !important;
+}
+
+.axcc-loading,
+.axcc-unavailable {
+  opacity: 0.62 !important;
+}
+
+.axcc-retry {
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0.1rem !important;
+  font: inherit !important;
+  text-decoration: underline !important;
+  cursor: pointer !important;
+}
+
+.axcc-retry:hover,
+.axcc-retry:focus-visible {
+  opacity: 0.9 !important;
+  text-decoration: underline !important;
+  outline: none !important;
+}
+
+.axcc-spinner {
+  display: inline-block !important;
+  width: 0.72rem !important;
+  height: 0.72rem !important;
+  border: 1.5px solid currentColor !important;
+  border-right-color: transparent !important;
+  border-radius: 50% !important;
+  animation: axcc-spin 0.7s linear infinite !important;
+}
+
+.axcc-paper-count {
+  flex-shrink: 0 !important;
+  font-size: 0.8rem !important;
+  line-height: 1.4 !important;
+  color: var(--color-text, inherit) !important;
+}
+
+.axcc-paper-reader {
+  margin: 0.4rem 0.75rem !important;
+  max-width: calc(100% - 1.5rem) !important;
+}
+
+@keyframes axcc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
