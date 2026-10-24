@@ -2,6 +2,7 @@
   "use strict";
 
   const ROW_CLASS = "axcc-citation-count";
+  const CARD_SELECTOR = ".absolute.z-50, .fixed.z-50";
   const CONTENT_VERSION = chrome.runtime.getManifest().version;
   document.documentElement.dataset.axccHelperVersion = CONTENT_VERSION;
   const PAPER_CLASS = "axcc-paper-count";
@@ -63,12 +64,12 @@
   });
 
   function citationCards() {
-    const cards = new Set(document.querySelectorAll(".absolute.z-50"));
+    const cards = new Set(document.querySelectorAll(CARD_SELECTOR));
     const markers = document.querySelectorAll(
       'a[aria-label="Search for citation"], a.line-clamp-4'
     );
     for (const marker of markers) {
-      const exact = marker.closest(".absolute.z-50");
+      const exact = marker.closest(CARD_SELECTOR);
       if (exact) {
         cards.add(exact);
         continue;
@@ -87,11 +88,18 @@
   }
 
   function referenceLink(card) {
+    const links = Array.from(card.querySelectorAll("a[href]"))
+      .filter((link) => !link.closest(`.${ROW_CLASS}`));
+    const paper = links.find((link) =>
+      /^https:\/\/(?:www\.)?alphaxiv\.org\/(?:abs|overview|pdf)\//i.test(link.href) &&
+      link.textContent.trim().length >= 12
+    );
+    if (paper) return paper;
     const preferred = card.querySelector("a.line-clamp-4");
     if (preferred && preferred.textContent.trim().length >= 20) return preferred;
+    if (card.matches(".fixed.z-50")) return null;
 
-    return Array.from(card.querySelectorAll("a[href]")).find((link) => {
-      if (link.closest(`.${ROW_CLASS}`)) return false;
+    return links.find((link) => {
       const text = (link.textContent || "").replace(/\s+/g, " ").trim();
       return (
         text.length >= 20 &&
@@ -103,7 +111,7 @@
 
   function referenceText(link) {
     const visible = (link.textContent || "").replace(/\s+/g, " ").trim();
-    if (visible.length >= 20) return visible;
+    if (visible.length >= 12) return visible;
     try {
       const query = new URL(link.href).searchParams.get("q");
       return (query || "").replace(/\s+/g, " ").trim();

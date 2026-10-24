@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyHoverRetries } from "./test-hover-retry.mjs";
-export { verifyHoverRetries };
+import { verifySummaryCards } from "./test-summary-card.mjs";
+export { verifyHoverRetries, verifySummaryCards };
 
 export async function installFixture(worker) {
   await worker.evaluate(() => {
@@ -43,6 +44,18 @@ export async function installFixture(worker) {
       if (mode === "busy") return respond({}, 429);
       if (mode === "missing") return respond({}, 404);
       const paperForId = id => {
+        if (id.includes("2508.08241")) return {
+          paperId: "beyondmimic-id",
+          title: "BeyondMimic: From Motion Tracking to Versatile Humanoid Control via Guided Diffusion",
+          citationCount: 731,
+          externalIds: { ArXiv: "2508.08241" },
+        };
+        if (id.includes("2503.11801")) return {
+          paperId: "diffuse-cloc-id",
+          title: "Diffuse-CLoC: Guided Diffusion for Physics-based Character Look-ahead Control",
+          citationCount: 42,
+          externalIds: { ArXiv: "2503.11801" },
+        };
         const flow = id.includes("2210.02747");
         const source = id.includes("2601.16163");
         return {
@@ -90,13 +103,16 @@ export async function verifyExtension(context, worker, page, outputDir, assertio
   await expect(main).toHaveClass(/axcc-paper-reader/);
   await expect(main).toBeVisible();
   assert.equal(await worker.evaluate(() => axccTestRequests.length), 1);
+  const pageNumber = page.getByRole("tablist", { name: "Paper", exact: true }).locator("..").locator('input[type="text"]');
+  await pageNumber.fill("2");
+  await pageNumber.press("Enter");
   const citation = page.locator('a[href="#cite.nvidia2025cosmosworldfoundationmodel"]').first();
   await citation.waitFor({ state: "visible" });
   const openCitation = async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.mouse.move(1200, 100);
       await page.locator(".absolute.z-50").waitFor({ state: "hidden" });
-      await citation.click();
+      await citation.hover();
       try {
         await hover.waitFor({ state: "visible", timeout: 2_000 });
         return;
@@ -220,6 +236,9 @@ if (typeof process !== "undefined" && process.argv[1] && resolve(process.argv[1]
     const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker");
     await installFixture(worker);
     await verifyExtension(context, worker, context.pages()[0], join(extensionDir, "test-results"));
+    const summaryPage = await context.newPage();
+    await verifySummaryCards(context, worker, summaryPage, join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
+    await summaryPage.close();
     await verifyHoverRetries(context, worker, await context.newPage(), join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
   } finally {
     await context?.close();

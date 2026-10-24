@@ -15,7 +15,7 @@ Use this Manifest V3 Chrome extension to display Semantic Scholar citation count
 
 Open an alphaXiv abstract page to display the paper's citation count below its title. Switch to the PDF reader to display the same count below the toolbar. Click the count to open the paper's Semantic Scholar record.
 
-Hover an in-text reference to display a count in alphaXiv's citation card. By default, the extension requests a reference's count when opening its card, reuses saved results on subsequent visits.
+Hover a paper link in the AI summary or an in-text reference in the PDF reader to display a count in alphaXiv's citation card. By default, the extension requests a reference's count when opening its card, reuses saved results on subsequent visits.
 
 If Semantic Scholar returns a rate limit or a temporary error, keep the reference card open while the extension retries automatically. After each failed attempt, it waits at least half a second before retrying. It spaces API requests at least 1.1 seconds apart across the extension, observes longer delays requested by the service. It pauses retries when closing or hiding a card, switching tabs, navigating away, or disabling the extension. When returning to a visible card, it resumes until receiving a count or a permanent result.
 
@@ -57,4 +57,4 @@ Run the Chrome integration checks with Playwright available through `NODE_PATH`:
 NODE_PATH=/path/to/node_modules node test-e2e.mjs
 ```
 
-During the integration checks, Chrome loads this unpacked extension in a temporary profile and opens real alphaXiv pages. The test supplies Semantic Scholar responses to exercise successful counts, rate limits, missing records, retries, cache clearing, the enable switch, navigation between papers. It also checks request counts in both loading modes, saved preferences, page and reference badges after DOM updates. Screenshots are saved under `test-results/`.
+During the integration checks, Chrome loads this unpacked extension in a temporary profile and opens real alphaXiv pages. The test supplies Semantic Scholar responses to exercise successful counts, rate limits, missing records, retries, cache clearing, the enable switch, navigation between papers. It opens the Diffuse-CLoC link in BeyondMimic's AI summary and references in the PDF reader. It also checks request counts in both loading modes, saved preferences, page and reference badges after DOM updates. Screenshots are saved under `test-results/`.

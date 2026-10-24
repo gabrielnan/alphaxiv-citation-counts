@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "alphaXiv Citation Counts",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Adds Semantic Scholar citation counts to alphaXiv papers and citation hover cards.",
   "icons": {
     "16": "icons/icon16.png",
