@@ -41,6 +41,10 @@ a.axcc-result:hover {
   opacity: 0.55 !important;
 }
 
+.axcc-auto-retry {
+  font-size: 0.64rem !important;
+}
+
 .axcc-loading,
 .axcc-unavailable {
   opacity: 0.62 !important;

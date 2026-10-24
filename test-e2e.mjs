@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyHoverRetries } from "./test-hover-retry.mjs";
+export { verifyHoverRetries };
 
 export async function installFixture(worker) {
   await worker.evaluate(() => {
@@ -11,6 +13,9 @@ export async function installFixture(worker) {
     globalThis.axccTestMode = "success";
     globalThis.axccTestRequests = [];
     globalThis.axccTestBibliographies = [];
+    globalThis.axccTestReferenceFailures = 0;
+    globalThis.axccTestReferenceTimes = [];
+    globalThis.axccTestReferenceRetryAfter = 0;
     globalThis.fetch = async (input, init = {}) => {
       const url = new URL(String(input));
       if (url.hostname === "www.alphaxiv.org" && url.pathname.endsWith(".md")) {
@@ -20,9 +25,20 @@ export async function installFixture(worker) {
       if (url.hostname !== "api.semanticscholar.org") return axccNativeFetch(input, init);
       axccTestRequests.push(url.href);
       const mode = axccTestMode;
-      const respond = (value, status = 200) => new Response(JSON.stringify(value), {
-        status, headers: { "Content-Type": "application/json" },
+      const respond = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), {
+        status, headers: { "Content-Type": "application/json", ...headers },
       });
+      const isReference = decodeURIComponent(url.pathname).includes("ARXIV:2501.03575");
+      if (isReference) {
+        axccTestReferenceTimes.push(Date.now());
+        if (axccTestReferenceFailures > 0) {
+          axccTestReferenceFailures--;
+          return respond({}, 429, axccTestReferenceRetryAfter ? { "Retry-After": String(axccTestReferenceRetryAfter) } : {});
+        }
+        if (mode === "busy-reference") return respond({}, 429);
+        if (mode === "missing-reference") return respond({}, 404);
+        if (mode === "auth-reference") return respond({}, 403);
+      }
       if (init.headers?.["x-api-key"] === "bad-key") return respond({}, 403);
       if (mode === "busy") return respond({}, 429);
       if (mode === "missing") return respond({}, 404);
@@ -75,11 +91,19 @@ export async function verifyExtension(context, worker, page, outputDir, assertio
   await expect(main).toBeVisible();
   assert.equal(await worker.evaluate(() => axccTestRequests.length), 1);
   const citation = page.locator('a[href="#cite.nvidia2025cosmosworldfoundationmodel"]').first();
+  await citation.waitFor({ state: "visible" });
   const openCitation = async () => {
-    await page.mouse.move(1200, 100);
-    await page.locator(".absolute.z-50").waitFor({ state: "hidden" });
-    await citation.click();
-    await hover.waitFor({ state: "visible" });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.mouse.move(1200, 100);
+      await page.locator(".absolute.z-50").waitFor({ state: "hidden" });
+      await citation.click();
+      try {
+        await hover.waitFor({ state: "visible", timeout: 2_000 });
+        return;
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+    }
   };
   await openCitation();
   await expect(hover).toHaveText(/1,234 citations\s*Semantic Scholar/);
@@ -112,9 +136,9 @@ export async function verifyExtension(context, worker, page, outputDir, assertio
   await openCitation();
   await expect(hover).toContainText("Semantic Scholar is rate-limited");
   await expect(hover.getByRole("link", { name: "Google Scholar" })).toHaveAttribute("href", /scholar\.google\.com\/scholar\?q=/);
+  await expect(hover).toContainText("Retrying automatically");
+  await page.screenshot({ path: join(outputDir, "native-automatic-retry.png"), scale: "css" });
   await worker.evaluate(() => { globalThis.axccTestMode = "success"; });
-  await hover.getByRole("button", { name: "Retry", exact: true }).click();
-  await openCitation();
   await expect(hover).toContainText("1,234 citations");
   await main.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(main).toContainText("412 citations");
@@ -196,6 +220,7 @@ if (typeof process !== "undefined" && process.argv[1] && resolve(process.argv[1]
     const worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker");
     await installFixture(worker);
     await verifyExtension(context, worker, context.pages()[0], join(extensionDir, "test-results"));
+    await verifyHoverRetries(context, worker, await context.newPage(), join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
   } finally {
     await context?.close();
     await rm(profileDir, { recursive: true, force: true });

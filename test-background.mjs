@@ -197,6 +197,30 @@ test("keyed requests retry rate limits and server errors within the shared queue
   assert.equal(h.calls.length, 3);
 });
 
+test("hover lookups return rate limits promptly with the requested retry delay", async () => {
+  const h = await harness(() => new Response("{}", { status: 429, headers: { "Retry-After": "2" } }), {
+    semanticScholarApiKey: "saved-key",
+  });
+  assert.deepEqual(await h.send({ type: "axcc:lookup", reference, hrefs: ["https://arxiv.org/abs/2210.02747"] }), {
+    ok: false, error: "s2_busy", result: null, retryAfterMs: 2000,
+  });
+  assert.equal(h.calls.length, 1);
+});
+
+test("the shared request queue observes a server retry delay", async () => {
+  const times = [];
+  const h = await harness(() => {
+    times.push(Date.now());
+    return times.length === 1
+      ? new Response("{}", { status: 429, headers: { "Retry-After": "2" } })
+      : json(paper);
+  });
+  const message = { type: "axcc:lookup", reference, hrefs: ["https://arxiv.org/abs/2210.02747"] };
+  assert.equal((await h.send(message)).retryAfterMs, 2000);
+  assert.equal((await h.send(message)).result.citationCount, 3654);
+  assert.ok(times[1] - times[0] >= 2000);
+});
+
 test("extension requests permission for the supported citation provider", async () => {
   const manifest = JSON.parse(await readFile(new URL("manifest.json", import.meta.url)));
   assert.deepEqual(manifest.host_permissions, [

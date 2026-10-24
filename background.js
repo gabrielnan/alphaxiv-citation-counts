@@ -41,11 +41,13 @@ const lookupInFlight = new Map();
 const prefetchInFlight = new Map();
 let semanticScholarQueue = Promise.resolve();
 let lastSemanticScholarRequestAt = 0;
+let semanticScholarBlockedUntil = 0;
 
 class SemanticScholarUnavailableError extends Error {
-  constructor() {
+  constructor(retryAfterMs = 0) {
     super("Semantic Scholar is temporarily unavailable");
     this.name = "SemanticScholarUnavailableError";
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -57,9 +59,10 @@ class SemanticScholarAuthError extends Error {
 }
 
 class SemanticScholarBusyError extends Error {
-  constructor() {
+  constructor(retryAfterMs = 0) {
     super("Semantic Scholar is rate-limiting requests");
     this.name = "SemanticScholarBusyError";
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -85,11 +88,18 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryAfterMs(response) {
+  const value = response.headers.get("retry-after");
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+  return Math.max(0, Date.parse(value) - Date.now()) || 0;
+}
+
 function enqueueSemanticScholarRequest(operation) {
   const queued = semanticScholarQueue.then(async () => {
     const delay = Math.max(
       0,
-      lastSemanticScholarRequestAt + S2_MIN_REQUEST_GAP_MS - Date.now()
+      Math.max(lastSemanticScholarRequestAt + S2_MIN_REQUEST_GAP_MS, semanticScholarBlockedUntil) - Date.now()
     );
     if (delay) await wait(delay);
     lastSemanticScholarRequestAt = Date.now();
@@ -128,7 +138,7 @@ async function semanticScholar(
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), S2_TIMEOUT_MS);
         try {
-          return await fetch(`${S2_BASE}/${path}`, {
+          const response = await fetch(`${S2_BASE}/${path}`, {
             method,
             signal: controller.signal,
             headers: {
@@ -137,6 +147,10 @@ async function semanticScholar(
             },
             body: body ? JSON.stringify(body) : undefined,
           });
+          if (response.status === 429 || response.status >= 500) {
+            semanticScholarBlockedUntil = Math.max(semanticScholarBlockedUntil, Date.now() + retryAfterMs(response));
+          }
+          return response;
         } finally {
           clearTimeout(timeout);
         }
@@ -153,7 +167,7 @@ async function semanticScholar(
       throw new SemanticScholarAuthError();
     }
     if (response.status === 429) {
-      if (attempt === maxRetries) throw new SemanticScholarBusyError();
+      if (attempt === maxRetries) throw new SemanticScholarBusyError(retryAfterMs(response));
       const retryAfter = Number(response.headers.get("retry-after"));
       const backoff = Number.isFinite(retryAfter) && retryAfter > 0
         ? retryAfter * 1_000
@@ -162,7 +176,7 @@ async function semanticScholar(
       continue;
     }
     if (response.status >= 500) {
-      if (attempt === maxRetries) throw new SemanticScholarUnavailableError();
+      if (attempt === maxRetries) throw new SemanticScholarUnavailableError(retryAfterMs(response));
       await wait(1_000 * 2 ** attempt);
       continue;
     }
@@ -232,19 +246,19 @@ async function semanticScholarBatch(infos) {
   }
 }
 
-async function semanticScholarByReference(reference, hrefs = []) {
+async function semanticScholarByReference(reference, hrefs = [], retries) {
   const identifier = extractIdentifiers(reference, hrefs);
   const id = semanticScholarId(identifier);
   let paper;
   if (id) {
     paper = await semanticScholar(
-      `paper/${encodeURIComponent(id)}?fields=${S2_FIELDS}`
+      `paper/${encodeURIComponent(id)}?fields=${S2_FIELDS}`, { retries }
     );
   } else {
     const title = safeTitleQuery(guessTitleFromReference(reference));
     if (title.length < 12) return null;
     const response = await semanticScholar(
-      `paper/search/match?query=${encodeURIComponent(title)}&fields=${S2_FIELDS}`
+      `paper/search/match?query=${encodeURIComponent(title)}&fields=${S2_FIELDS}`, { retries }
     );
     paper = response?.data?.[0] || null;
   }
@@ -421,19 +435,19 @@ async function pruneCache() {
   }
 }
 
-async function performLookup(reference, hrefs, sourcePaperId) {
+async function performLookup(reference, hrefs, sourcePaperId, interactive) {
   const prefetched = await fromPrefetchedPaper(sourcePaperId, reference);
   if (prefetched.result) return prefetched.result;
-  return semanticScholarByReference(reference, hrefs);
+  return semanticScholarByReference(reference, hrefs, interactive ? 0 : undefined);
 }
 
-async function lookup(reference, hrefs, sourcePaperId) {
+async function lookup(reference, hrefs, sourcePaperId, interactive = false) {
   const cached = await cachedLookup(reference, hrefs);
   if (cached !== undefined) return cached;
   const key = lookupCacheKey(reference, hrefs);
   if (lookupInFlight.has(key)) return lookupInFlight.get(key);
 
-  const promise = performLookup(reference, hrefs, sourcePaperId)
+  const promise = performLookup(reference, hrefs, sourcePaperId, interactive)
     .then(async (result) => {
       if (result) await storeLookup(reference, hrefs, result);
       return result;
@@ -495,13 +509,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: "invalid_reference", result: null });
       return false;
     }
-    lookup(reference, hrefs, sourcePaperId)
+    lookup(reference, hrefs, sourcePaperId, true)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) =>
         sendResponse({
           ok: false,
           error: errorCode(error),
           result: null,
+          ...(error.retryAfterMs > 0 ? { retryAfterMs: error.retryAfterMs } : {}),
         })
       );
     return true;

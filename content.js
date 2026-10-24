@@ -5,6 +5,8 @@
   const CONTENT_VERSION = chrome.runtime.getManifest().version;
   document.documentElement.dataset.axccHelperVersion = CONTENT_VERSION;
   const PAPER_CLASS = "axcc-paper-count";
+  const REFERENCE_RETRY_MS = 500;
+  const referenceStates = new Map();
   let enabled = false;
   let preloadReferences = false;
   let paperState = null;
@@ -36,6 +38,8 @@
       configRevision++;
       resetPaperPrefetch();
       paperState = null;
+      for (const state of referenceStates.values()) clearTimeout(state.timer);
+      referenceStates.clear();
       document.querySelectorAll(`.${ROW_CLASS}`).forEach((row) => row.remove());
       document.querySelectorAll("[data-axcc-reference]").forEach((card) => {
         delete card.dataset.axccReference;
@@ -317,7 +321,77 @@
       });
   }
 
-  async function enhance(card) {
+  function cardVisible(card) {
+    if (document.hidden || !card.isConnected) return false;
+    const bounds = card.getBoundingClientRect();
+    const style = getComputedStyle(card);
+    return style.visibility !== "hidden" && style.opacity !== "0" &&
+      bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 &&
+      bounds.top < innerHeight && bounds.right > 0 && bounds.left < innerWidth;
+  }
+
+  function currentReference(state) {
+    return enabled && referenceStates.get(state.card) === state &&
+      state.row.isConnected && state.paperId === sourcePaperId() &&
+      state.card.dataset.axccReference === state.key;
+  }
+
+  function pauseReference(state) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+
+  function scheduleReferenceRetry(state) {
+    if (state.timer !== null || state.pending || !state.retryable ||
+        !currentReference(state) || !cardVisible(state.card)) return;
+    const delay = Math.max(REFERENCE_RETRY_MS, state.retryAt - Date.now());
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      if (currentReference(state) && cardVisible(state.card)) void lookupReference(state);
+    }, delay);
+  }
+
+  async function lookupReference(state) {
+    if (state.pending || !currentReference(state) || !cardVisible(state.card)) return;
+    pauseReference(state);
+    state.pending = true;
+    let response;
+    try {
+      response = await sendRuntimeMessage({
+        type: "axcc:lookup",
+        reference: state.reference,
+        hrefs: state.hrefs,
+        sourcePaperId: state.paperId,
+      }, 45_000);
+    } catch (error) {
+      response = { error: error?.code || "lookup_failed" };
+    } finally {
+      state.pending = false;
+    }
+    if (!currentReference(state)) return;
+    const error = response?.error;
+    state.retryable = ["s2_busy", "s2_unavailable", "lookup_timeout", "lookup_failed"].includes(error);
+    state.retryAt = Date.now() + Math.max(REFERENCE_RETRY_MS, Number(response?.retryAfterMs) || 0);
+    if (!state.rendered || state.error !== error || !state.retryable) {
+      const retryable = showResult(state.row, response?.ok ? response.result : null, error, state.reference);
+      if (state.retryable) {
+        const hint = document.createElement("span");
+        hint.className = "axcc-auto-retry";
+        hint.textContent = "Retrying automatically";
+        state.row.append(hint);
+      } else if (retryable) {
+        makeRetryable(state.row, () => {
+          state.rendered = false;
+          void lookupReference(state);
+        });
+      }
+      state.error = error;
+      state.rendered = true;
+    }
+    scheduleReferenceRetry(state);
+  }
+
+  function enhance(card) {
     const link = referenceLink(card);
     if (!link) return;
     const reference = referenceText(link);
@@ -330,59 +404,38 @@
       .filter(Boolean)
       .slice(0, 12);
     const key = fingerprint(reference + "\n" + hrefs.join("\n"));
-    const existingRow = card.querySelector(`.${ROW_CLASS}`);
-    if (
-      card.dataset.axccReference === key &&
-      existingRow?.dataset.axccVersion === CONTENT_VERSION
-    ) {
+    const previous = referenceStates.get(card);
+    if (previous?.key === key && currentReference(previous)) {
+      if (cardVisible(card)) scheduleReferenceRetry(previous);
+      else pauseReference(previous);
       return;
     }
-
+    if (previous) pauseReference(previous);
+    referenceStates.delete(card);
+    if (!cardVisible(card)) return;
     card.dataset.axccReference = key;
     card.querySelectorAll(`.${ROW_CLASS}`).forEach((row) => row.remove());
     const row = loadingRow();
     link.insertAdjacentElement("afterend", row);
-
-    try {
-      const response = await sendRuntimeMessage(
-        {
-          type: "axcc:lookup",
-          reference,
-          hrefs,
-          sourcePaperId: sourcePaperId(),
-        },
-        45_000
-      );
-      if (!row.isConnected || card.dataset.axccReference !== key) return;
-      const retryable = showResult(
-        row,
-        response?.ok ? response.result : null,
-        response?.error,
-        reference
-      );
-      if (retryable) makeRetryable(row, () => {
-        if (!row.isConnected || card.dataset.axccReference !== key) return;
-        delete card.dataset.axccReference;
-        row.remove();
-        void enhance(card);
-      });
-    } catch (error) {
-      if (row.isConnected && card.dataset.axccReference === key) {
-        const code = error?.code === "lookup_timeout" ? "lookup_timeout" : "lookup_failed";
-        showResult(row, null, code, reference);
-        makeRetryable(row, () => {
-          if (!row.isConnected || card.dataset.axccReference !== key) return;
-          delete card.dataset.axccReference;
-          row.remove();
-          void enhance(card);
-        });
-      }
-    }
+    const state = {
+      card, row, key, reference, hrefs, paperId: sourcePaperId(),
+      timer: null, pending: false, retryable: false, retryAt: 0, rendered: false,
+    };
+    referenceStates.set(card, state);
+    void lookupReference(state);
   }
 
   function scan() {
     scanQueued = false;
     if (!enabled) return;
+    for (const [card, state] of referenceStates) {
+      if (!currentReference(state)) {
+        pauseReference(state);
+        referenceStates.delete(card);
+      } else if (!cardVisible(card)) {
+        pauseReference(state);
+      }
+    }
     enhancePaper();
     ensurePaperPrefetch();
     for (const card of citationCards()) void enhance(card);
@@ -399,8 +452,13 @@
     childList: true,
     subtree: true,
     characterData: true,
+    attributes: true,
+    attributeFilter: ["class", "style", "hidden", "aria-hidden"],
   });
 
+  document.addEventListener("visibilitychange", queueScan);
+  window.addEventListener("scroll", queueScan, { capture: true, passive: true });
+  window.addEventListener("resize", queueScan, { passive: true });
   window.addEventListener("popstate", queueScan);
   window.navigation?.addEventListener("navigatesuccess", queueScan);
 })();

@@ -17,7 +17,9 @@ Open an alphaXiv abstract page to display the paper's citation count below its t
 
 Hover an in-text reference to display a count in alphaXiv's citation card. By default, the extension requests a reference's count when opening its card, reuses saved results on subsequent visits.
 
-If Semantic Scholar returns a rate limit or a service error, use **Retry** beside the status. Use **Google Scholar** to search for the paper when a count is unavailable. The extension retrieves displayed counts from Semantic Scholar; the Google Scholar button opens a search in a separate tab.
+If Semantic Scholar returns a rate limit or a temporary error, keep the reference card open while the extension retries automatically. After each failed attempt, it waits at least half a second before retrying. It spaces API requests at least 1.1 seconds apart across the extension, observes longer delays requested by the service. It pauses retries when closing or hiding a card, switching tabs, navigating away, or disabling the extension. When returning to a visible card, it resumes until receiving a count or a permanent result.
+
+For the open paper's own count, use **Retry** beside its status. Use **Google Scholar** to search for a paper when a count is unavailable. The extension retrieves displayed counts from Semantic Scholar; the Google Scholar button opens a search in a separate tab.
 
 The extension uses the paper's arXiv identifier for its main count, so it can request this count independently of the bibliography. When navigating between papers, it requests the new paper's count. When switching between the abstract and PDF views, it moves the existing badge.
 
@@ -31,7 +33,7 @@ Turn **Preload reference counts** on to load reference counts in advance. The ex
 
 With **Save & test**, request a live count for *Flow Matching for Generative Modeling* before saving the proposed key in `chrome.storage.local`. The extension sends this key to Semantic Scholar in its API request headers.
 
-The extension serializes Semantic Scholar requests with at least 1.1 seconds between starts. With a saved key, it retries rate limits and service failures up to twice. Without a key, it reports these errors immediately so the reader can retry or use Google Scholar.
+The extension serializes Semantic Scholar requests with at least 1.1 seconds between starts. For reference cards, it reports transient failures immediately and retries while the card remains visible. For the paper's own count and optional preloading, it retries rate limits and service failures up to twice with a saved key. A rejected key or an absent match ends automatic retries.
 
 The extension caches successful counts for seven days, retries empty bibliography records after an hour. After updating to version 1.9, it uses a new cache version when reading counts. Use **Clear cache** to remove saved lookup results and refresh visible badges.
 
