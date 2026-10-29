@@ -6,8 +6,11 @@
   const CONTENT_VERSION = chrome.runtime.getManifest().version;
   document.documentElement.dataset.axccHelperVersion = CONTENT_VERSION;
   const PAPER_CLASS = "axcc-paper-count";
+  const BOOKMARK_CLASS = "axcc-bookmark-count";
   const REFERENCE_RETRY_MS = 500;
   const referenceStates = new Map();
+  let bookmarkTimer = null;
+  let bookmarkPending = false;
   let enabled = false;
   let preloadReferences = false;
   let paperState = null;
@@ -39,6 +42,8 @@
       configRevision++;
       resetPaperPrefetch();
       paperState = null;
+      clearTimeout(bookmarkTimer);
+      bookmarkTimer = null;
       for (const state of referenceStates.values()) clearTimeout(state.timer);
       referenceStates.clear();
       document.querySelectorAll(`.${ROW_CLASS}`).forEach((row) => row.remove());
@@ -55,8 +60,9 @@
       ok: true,
       version: CONTENT_VERSION,
       page: location.href,
-      citationRows: document.querySelectorAll(`.${ROW_CLASS}:not(.${PAPER_CLASS})`).length,
+      citationRows: document.querySelectorAll(`.${ROW_CLASS}:not(.${PAPER_CLASS}):not(.${BOOKMARK_CLASS})`).length,
       paperRows: document.querySelectorAll(`.${PAPER_CLASS}`).length,
+      bookmarkRows: document.querySelectorAll(`.${BOOKMARK_CLASS}`).length,
       preloadReferences,
       loadingRows: document.querySelectorAll(`.${ROW_CLASS}.axcc-loading`).length,
     });
@@ -120,11 +126,108 @@
     }
   }
 
-  function sourcePaperId() {
-    const match = location.pathname.match(
+  function paperIdFromPath(pathname) {
+    const match = pathname.match(
       /^\/(?:abs|overview|pdf)\/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?(?:\/|$)/i
     );
     return match?.[1] || null;
+  }
+
+  function sourcePaperId() {
+    return paperIdFromPath(location.pathname);
+  }
+
+  function bookmarksPage() {
+    return /^\/bookmarks\/?$/i.test(location.pathname);
+  }
+
+  function linkedPaperId(link) {
+    try {
+      const url = new URL(link.href);
+      return /^https:\/\/(?:www\.)?alphaxiv\.org\//i.test(url.href)
+        ? paperIdFromPath(url.pathname) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function bookmarkTitles() {
+    const titles = new Map();
+    for (const link of document.querySelectorAll("a[href]")) {
+      if (link.closest(`.${ROW_CLASS}, ${CARD_SELECTOR}, nav, aside, [role="navigation"]`)) continue;
+      const paperId = linkedPaperId(link);
+      if (!paperId) continue;
+      let container = link;
+      for (let depth = 0; container && depth < 5; depth++, container = container.parentElement) {
+        const otherPaper = Array.from(container.querySelectorAll("a[href]"))
+          .some((anchor) => linkedPaperId(anchor) && linkedPaperId(anchor) !== paperId);
+        if (otherPaper) break;
+        const candidates = Array.from(container.querySelectorAll('h2, h3, [class*="line-clamp"], p, span, div'));
+        const title = candidates.find((node) =>
+          !node.closest(`.${ROW_CLASS}`) && node.textContent.trim().length >= 4 &&
+          !/^(added|saved)\s/i.test(node.textContent.trim()) &&
+          (node.matches('h2, h3, [class*="line-clamp"]') || node.children.length === 0)
+        ) || (!container.querySelector("img") && container.textContent.trim().length >= 4 ? container : null);
+        if (!title) continue;
+        titles.set(title, { link, paperId });
+        break;
+      }
+    }
+    return titles;
+  }
+
+  function enhanceBookmarks() {
+    if (!bookmarksPage()) return;
+    for (const [title, { link, paperId }] of bookmarkTitles()) {
+      const previous = referenceStates.get(title);
+      if (previous?.bookmark && previous.key === paperId && currentReference(previous)) {
+        if (title.nextElementSibling !== previous.row) title.insertAdjacentElement("afterend", previous.row);
+        continue;
+      }
+      if (previous) {
+        pauseReference(previous);
+        previous.row.remove();
+        referenceStates.delete(title);
+      }
+      if (!cardVisible(title)) continue;
+      const row = loadingRow();
+      row.classList.add(BOOKMARK_CLASS);
+      row.dataset.axccPaperId = paperId;
+      title.insertAdjacentElement("afterend", row);
+      title.dataset.axccReference = paperId;
+      referenceStates.set(title, {
+        card: title, row, key: paperId, reference: `arXiv:${paperId}`, hrefs: [],
+        query: title.textContent.trim(), paperId: null, link, bookmark: true,
+        timer: null, pending: false, retryable: false, retryAt: 0, rendered: false,
+      });
+    }
+    scheduleBookmarkLookups();
+  }
+
+  function scheduleBookmarkLookups() {
+    clearTimeout(bookmarkTimer);
+    bookmarkTimer = null;
+    if (bookmarkPending || !enabled || !bookmarksPage() || document.hidden) return;
+    const candidates = Array.from(referenceStates.values()).filter((state) =>
+      state.bookmark && currentReference(state) && cardVisible(state.card) &&
+      !state.pending && (!state.rendered || state.retryable)
+    ).sort((left, right) => Number(left.rendered) - Number(right.rendered) || left.retryAt - right.retryAt);
+    const next = candidates[0];
+    if (!next) return;
+    bookmarkTimer = setTimeout(async () => {
+      bookmarkTimer = null;
+      if (!currentReference(next) || !cardVisible(next.card)) {
+        scheduleBookmarkLookups();
+        return;
+      }
+      bookmarkPending = true;
+      try {
+        await lookupReference(next);
+      } finally {
+        bookmarkPending = false;
+        scheduleBookmarkLookups();
+      }
+    }, Math.max(0, next.retryAt - Date.now()));
   }
 
   function resetPaperPrefetch() {
@@ -218,7 +321,7 @@
     return link;
   }
 
-  function showResult(row, result, error, query) {
+  function showResult(row, result, error, query, links = true) {
     row.classList.remove("axcc-loading", "axcc-unavailable");
     row.replaceChildren();
 
@@ -241,15 +344,16 @@
         status.textContent = "No Semantic Scholar count available";
         row.title = "Semantic Scholar did not return a confident match with a citation count.";
       }
-      row.append(status, scholarLink(query));
+      row.append(status);
+      if (links) row.append(scholarLink(query));
       return Boolean(error);
     }
 
     const count = Number(result.citationCount).toLocaleString();
-    const badge = result.url ? document.createElement("a") : document.createElement("span");
+    const badge = result.url && links ? document.createElement("a") : document.createElement("span");
     badge.className = "axcc-result";
     badge.textContent = `${count} citation${result.citationCount === 1 ? "" : "s"}`;
-    if (result.url) {
+    if (result.url && links) {
       badge.href = result.url;
       badge.target = "_blank";
       badge.rel = "noopener noreferrer";
@@ -341,6 +445,7 @@
   function currentReference(state) {
     return enabled && referenceStates.get(state.card) === state &&
       state.row.isConnected && state.paperId === sourcePaperId() &&
+      (!state.bookmark || (bookmarksPage() && state.link.isConnected && linkedPaperId(state.link) === state.key)) &&
       state.card.dataset.axccReference === state.key;
   }
 
@@ -350,6 +455,10 @@
   }
 
   function scheduleReferenceRetry(state) {
+    if (state.bookmark) {
+      scheduleBookmarkLookups();
+      return;
+    }
     if (state.timer !== null || state.pending || !state.retryable ||
         !currentReference(state) || !cardVisible(state.card)) return;
     const delay = Math.max(REFERENCE_RETRY_MS, state.retryAt - Date.now());
@@ -381,16 +490,18 @@
     state.retryable = ["s2_busy", "s2_unavailable", "lookup_timeout", "lookup_failed"].includes(error);
     state.retryAt = Date.now() + Math.max(REFERENCE_RETRY_MS, Number(response?.retryAfterMs) || 0);
     if (!state.rendered || state.error !== error || !state.retryable) {
-      const retryable = showResult(state.row, response?.ok ? response.result : null, error, state.reference);
+      const links = !state.row.closest("a");
+      const retryable = showResult(state.row, response?.ok ? response.result : null, error, state.query || state.reference, links);
       if (state.retryable) {
         const hint = document.createElement("span");
         hint.className = "axcc-auto-retry";
         hint.textContent = "Retrying automatically";
         state.row.append(hint);
-      } else if (retryable) {
+      } else if (retryable && links) {
         makeRetryable(state.row, () => {
           state.rendered = false;
-          void lookupReference(state);
+          if (state.bookmark) scheduleBookmarkLookups();
+          else void lookupReference(state);
         });
       }
       state.error = error;
@@ -439,6 +550,7 @@
     for (const [card, state] of referenceStates) {
       if (!currentReference(state)) {
         pauseReference(state);
+        if (state.bookmark) state.row.remove();
         referenceStates.delete(card);
       } else if (!cardVisible(card)) {
         pauseReference(state);
@@ -446,6 +558,11 @@
     }
     enhancePaper();
     ensurePaperPrefetch();
+    enhanceBookmarks();
+    if (!bookmarksPage()) {
+      clearTimeout(bookmarkTimer);
+      bookmarkTimer = null;
+    }
     for (const card of citationCards()) void enhance(card);
   }
 
@@ -461,7 +578,7 @@
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+    attributeFilter: ["class", "style", "hidden", "aria-hidden", "href"],
   });
 
   document.addEventListener("visibilitychange", queueScan);

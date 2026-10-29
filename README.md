@@ -23,6 +23,10 @@ For the open paper's own count, use **Retry** beside its status. Use **Google Sc
 
 The extension uses the paper's arXiv identifier for its main count, so it can request this count independently of the bibliography. When navigating between papers, it requests the new paper's count. When switching between the abstract and PDF views, it moves the existing badge.
 
+## Browse bookmarks
+
+Open **Library** or a bookmark folder to display citation counts beneath the saved paper titles. As cards enter the visible area, the extension requests their counts sequentially using their arXiv identifiers. It reuses saved counts across folders and paper pages. After a temporary service failure, it retries visible cards while observing the shared API delay. Scrolling a card out of view or switching away from the tab pauses further requests for that card.
+
 ## Configure access
 
 Open the extension's toolbar popup to enable or disable counts, save a Semantic Scholar API key, or clear cached lookups.
@@ -57,4 +61,4 @@ Run the Chrome integration checks with Playwright available through `NODE_PATH`:
 NODE_PATH=/path/to/node_modules node test-e2e.mjs
 ```
 
-During the integration checks, Chrome loads this unpacked extension in a temporary profile and opens real alphaXiv pages. The test supplies Semantic Scholar responses to exercise successful counts, rate limits, missing records, retries, cache clearing, the enable switch, navigation between papers. It opens the Diffuse-CLoC link in BeyondMimic's AI summary and references in the PDF reader. It also checks request counts in both loading modes, saved preferences, page and reference badges after DOM updates. Screenshots are saved under `test-results/`.
+During the integration checks, Chrome loads this unpacked extension in a temporary profile and opens real alphaXiv pages. The test supplies Semantic Scholar responses to exercise successful counts, rate limits, missing records, retries, cache clearing, the enable switch, navigation between papers. It opens the Diffuse-CLoC link in BeyondMimic's AI summary and references in the PDF reader. With a simulated bookmark folder, it checks linked cards, folder changes, visible-card loading, cache reuse. It also checks request counts in both loading modes, saved preferences, page and reference badges after DOM updates. Screenshots are saved under `test-results/`.

@@ -89,6 +89,13 @@ a.axcc-result:hover {
   max-width: calc(100% - 1.5rem) !important;
 }
 
+.axcc-bookmark-count {
+  box-sizing: border-box !important;
+  margin: 0.3rem 0 !important;
+  line-height: 1.35 !important;
+  border-radius: 0.5rem !important;
+}
+
 @keyframes axcc-spin {
   to {
     transform: rotate(360deg);

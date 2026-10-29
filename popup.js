@@ -35,7 +35,7 @@ async function checkPageHelper() {
     if (!tab?.id) throw new Error("no_active_tab");
     if (tab.url && !/^https:\/\/(?:www\.)?alphaxiv\.org\//i.test(tab.url)) {
       showPageStatus(
-        `Extension v${extensionVersion} · open an alphaXiv paper to check it`
+        `Extension v${extensionVersion} · open alphaXiv to check it`
       );
       return;
     }
@@ -51,7 +51,7 @@ async function checkPageHelper() {
 
     if (response?.version === extensionVersion) {
       showPageStatus(
-        `Extension v${extensionVersion} · page helper active (${response.paperRows || 0} paper, ${response.citationRows || 0} references)`,
+        `Extension v${extensionVersion} · page helper active (${response.paperRows || 0} paper, ${response.citationRows || 0} references, ${response.bookmarkRows || 0} bookmarks)`,
         "success"
       );
     } else if (response?.version) {

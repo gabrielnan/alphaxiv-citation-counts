@@ -6,7 +6,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyHoverRetries } from "./test-hover-retry.mjs";
 import { verifySummaryCards } from "./test-summary-card.mjs";
-export { verifyHoverRetries, verifySummaryCards };
+import { verifyBookmarkCards } from "./test-bookmarks.mjs";
+export { verifyHoverRetries, verifySummaryCards, verifyBookmarkCards };
 
 export async function installFixture(worker) {
   await worker.evaluate(() => {
@@ -240,6 +241,7 @@ if (typeof process !== "undefined" && process.argv[1] && resolve(process.argv[1]
     await verifySummaryCards(context, worker, summaryPage, join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
     await summaryPage.close();
     await verifyHoverRetries(context, worker, await context.newPage(), join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
+    await verifyBookmarkCards(context, worker, await context.newPage(), join(extensionDir, "test-results"), createRequire(import.meta.url)("playwright/test").expect);
   } finally {
     await context?.close();
     await rm(profileDir, { recursive: true, force: true });
